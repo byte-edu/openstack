@@ -1,0 +1,87 @@
+#!/bin/bash
+# Author: www.byte-edu.com
+# Description: To Create a Bridge network model for the virtual machine instances.
+
+BridgeName=p-switch0
+PhyNic=eth0
+VirtNic=$1
+
+# 安装 btctl 工具
+InstallBrctl(){
+  which brctl > /dev/null 2>&1
+  if [ $? -eq 0 ];then
+    echo "brctl has been installed."
+  else
+    yum install bridge-utils -y > /dev/null 2>&1
+    [ $? -eq 0 ] && echo "brctl was successfully installed" || (echo "brctl installation failed" && exit 1)
+  fi
+}
+
+# 创建物理桥
+CreateSwitch(){
+  ip link show ${BridgeName} > /dev/null 2>&1
+  if [ $? -eq 0 ];then
+    echo "The Bridge:[${BridgeName}] is exist."
+  else
+    brctl addbr ${BridgeName} && echo "The Bridge:[${BridgeName}] was created successfully." || (echo "The Bridge:[${BridgeName}] was created failed." && exit 1)
+    ip link set ${BridgeName} up
+  fi
+}
+
+# 给物理桥添加地址
+AttachPIP(){
+  yum install net-tools -y > /dev/null 2>&1
+  which ifconfig &> /dev/null || (echo "net-tools installation failed" && exit 1)
+  PrePIP=$(ip addr show ${PhyNic} | grep -w 'inet' |awk {'print $2'})
+  PreSIP=$(ip addr show ${BridgeName} | grep -w 'inet' |awk {'print $2'})
+  if [ ${PrePIP} ];then
+    ifconfig ${PhyNic} 0 
+    ifconfig ${BridgeName} ${PrePIP} up 
+    brctl addif ${BridgeName} ${PhyNic}
+  elif [ ${PreSIP} ];then
+    echo "${BridgeName} has IP address."
+  else
+    echo "The ${PhyNic} is not configured with IP."
+    exit 1
+  fi
+
+  PostPIP=$(ip addr show ${PhyNic} | grep -w 'inet' |awk {'print $2'})
+  SIP=$(ip addr show ${BridgeName} | grep -w 'inet' |awk {'print $2'})
+  if [ "${PrePIP}" == "${SIP}" ] && [ !${PostPIP} ]
+  then
+    echo "Bridge:[${BridgeName}] configuration succeeded."
+  elif [ ${PreSIP} ]
+  then
+    echo "Bridge:[${BridgeName}] is already exit and normal."
+  elif [ ${PrePIP} != ${SIP} ]
+  then
+    echo "Bridge:[${BridgeName}] configuration failed."
+  elif [ ${PostIP} ]
+  then
+    echo "The ${PhyNic} remove IP failed."
+  else
+    echo "unkown error."
+    exit 1
+  fi   
+}
+
+# 添加虚拟机实例网卡到物理桥
+AttachVirNic(){
+  if [ "${VirtNic}" ];then
+    ip link set ${VirtNic} up
+    brctl addif ${BridgeName} ${VirtNic}
+    [ $? -eq 0 ]&& echo "Attach Tap nic to ${BridgeName} succeeded." || (echo "Attach Tap nic to ${BridgeName} failed." && exit 1)
+  else
+    echo "The tap nic is not exist"
+    exit 1
+  fi
+}
+# 配置主函数
+MAIN(){
+  InstallBrctl
+  CreateSwitch
+  AttachPIP  
+  AttachVirNic
+} 
+
+MAIN
