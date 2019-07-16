@@ -1,0 +1,87 @@
+#!/bin/bash
+# Author: www.byte-edu.com
+# Description: To Create a NAT network model for the virtual machine instances.
+
+BridgeName=v-switch0
+HostVirtIP=172.16.10.254/24
+PhyNicIP=192.168.48.110
+SourceNet=172.16.10.0/24
+VirtNic=$1
+
+# 安装 btctl 工具
+InstallBrctl(){
+  which brctl > /dev/null 2>&1
+  if [ $? -eq 0 ];then
+    echo "brctl has been installed."
+  else
+    yum install bridge-utils -y > /dev/null 2>&1
+    [ $? -eq 0 ] && echo "brctl was successfully installed" || (echo "brctl installation failed" && exit 1)
+  fi
+}
+
+# 创建虚拟桥
+CreateSwitch(){
+  ip link show ${BridgeName} > /dev/null 2>&1
+  if [ $? -eq 0 ];then
+    echo "The Bridge:[${BridgeName}] is exist."
+  else
+    brctl addbr ${BridgeName} && echo "The Bridge:[${BridgeName}] was created successfully." || (echo "The Bridge:[${BridgeName}] was created failed." && exit 1)
+    ip link set ${BridgeName} up
+  fi
+}
+
+
+# 添加虚拟机实例网卡到虚拟桥
+AttachVirNic(){
+  if [ "${VirtNic}" ];then
+    ip link set ${VirtNic} up
+    sleep 0.5s
+    brctl addif ${BridgeName} ${VirtNic}
+    [ $? -eq 0 ]&& echo "Attach Tap nic to ${BridgeName} succeeded." || (echo "Attach Tap nic to ${BridgeName} failed." && exit 1)
+  else
+    echo "The tap nic is not exist"
+    exit 1
+  fi
+}
+
+# 添加宿主机虚拟网卡地址到虚拟桥
+AttachVirHostNic(){
+  BridgeIP=$(ip addr show ${BridgeName} | grep -w 'inet' |awk {'print $2'})
+  if [ "${BridgeIP}" == "${HostVirtIP}" ];then
+    echo "The Bridge:[$BridgeName] has IP. It's already Host-Only network,You can create Route or Nat network based on it."
+  elif [ !${BridgeIP} ];then
+    ifconfig ${BridgeName} ${HostVirtIP} up && echo "To Create Host-Only network succeeded." || (echo "To Create Host-Only network failed." && exit 1)
+  else
+    echo "The bridge already has an IP:[${BridgeIP}], but it does not match the address you specified [${HostVirtIP}]."
+    exit 1
+  fi
+}
+
+# 修改宿主机内核参数
+IPForward(){
+  echo 1 > /proc/sys/net/ipv4/ip_forward && echo "To Change ip_forward succeeded." || (echo "To Change ip_forward failed." && exit 1)
+}
+
+# 添加 NAT 转发规则
+AddNatRule(){
+  iptables -t nat -L -n | awk {'print $4'} |grep "${SourceNet}" > /dev/null 2>&1
+  if [ $? -eq 0 ];then
+    echo "The NAT rules alreay exist.[$(iptables -t nat -L -n |grep "${SourceNet}")]"
+  else
+    iptables -t nat -I POSTROUTING -s ${SourceNet} ! -d ${SourceNet} -j SNAT --to-source ${PhyNicIP}
+    [ $? -eq 0 ] && echo "Nat rules created successfully. [$(iptables -t nat -L -n --line-numbers|grep "${SourceNet}")]" || (echo "Nat rules created failure." && exit 1)
+  fi
+}
+
+
+# 配置主函数
+MAIN(){
+  InstallBrctl
+  CreateSwitch
+  AttachVirNic
+  AttachVirHostNic
+  IPForward
+  AddNatRule
+} 
+
+MAIN
