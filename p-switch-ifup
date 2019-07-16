@@ -52,7 +52,7 @@ AttachPIP(){
     echo "Bridge:[${BridgeName}] configuration succeeded."
   elif [ ${PreSIP} ]
   then
-    echo "Bridge:[${BridgeName}] is already exit and normal."
+    echo "Bridge:[${BridgeName}] is already exist and normal."
   elif [ ${PrePIP} != ${SIP} ]
   then
     echo "Bridge:[${BridgeName}] configuration failed."
